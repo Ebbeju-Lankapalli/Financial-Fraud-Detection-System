@@ -1,0 +1,8 @@
+# ============================================================
+# Financial Fraud Detection System
+# Repository-Wide Development Dependencies
+# ============================================================
+
+ruff==0.16.2
+pytest==9.1.1
+pytest-cov==7.1.0
