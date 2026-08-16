@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import torch
 import yaml
 from datasets import Dataset
 from peft import (
@@ -237,6 +238,7 @@ def load_quantized_model(
                 quantization_config
             ),
             device_map="auto",
+            dtype=torch.float16,
             trust_remote_code=(
                 trust_remote_code
             ),
@@ -266,6 +268,15 @@ def prepare_lora_model(
         model,
         lora_config,
     )
+
+    for parameter in model.parameters():
+        if (
+            parameter.requires_grad
+            and parameter.dtype != torch.float32
+        ):
+            parameter.data = parameter.data.to(
+                torch.float32
+            )
 
     return model
 
