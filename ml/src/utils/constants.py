@@ -124,21 +124,21 @@ TEST_SPLIT_RATIO = 0.20
 # =============================================================================
 
 # Training dataset:
-# 5,000 fraud + 5,000 legitimate = 10,000 examples.
+# 1,000 fraud + 1,000 legitimate = 2,000 examples.
 #
 # This is intentionally larger than the 1,000-example educational version
 # while remaining practical for QLoRA experimentation on limited GPU resources.
-TRAIN_SAMPLES_PER_CLASS = 5_000
+TRAIN_SAMPLES_PER_CLASS = 1_000
 
 TRAIN_DATASET_SIZE = TRAIN_SAMPLES_PER_CLASS * 2
 
 
 # Evaluation dataset:
-# 500 fraud + 500 legitimate = 1,000 unseen examples.
+# 250 fraud + 250 legitimate = 500 unseen examples.
 #
 # The evaluation split is created before sampling, which prevents leakage
 # between training and evaluation examples.
-TEST_SAMPLES_PER_CLASS = 500
+TEST_SAMPLES_PER_CLASS = 250
 
 TEST_DATASET_SIZE = TEST_SAMPLES_PER_CLASS * 2
 

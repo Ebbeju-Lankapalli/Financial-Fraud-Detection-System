@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -270,14 +271,14 @@ def prepare_lora_model(
 
 
 def format_conversation(
-    example: dict[str, Any],
+    example: Mapping[str, Any],
     tokenizer,
 ) -> str:
     """Render one messages example using the model chat template."""
 
-    if not isinstance(example, dict):
+    if not isinstance(example, Mapping):
         raise TypeError(
-            "example must be a dictionary."
+            "example must be a mapping."
         )
 
     messages = example.get(
@@ -629,7 +630,7 @@ def prepare_training_dataset(
         )
 
     def render_example(
-        example: dict[str, Any],
+        example: Mapping[str, Any],
     ) -> dict[str, str]:
         return {
             "text": format_conversation(
