@@ -34,5 +34,21 @@ class Settings:
         "sqlite:///./app.db",
     )
 
+    groq_api_key: str | None = os.getenv(
+        "GROQ_API_KEY"
+    )
+
+    groq_model: str = os.getenv(
+        "GROQ_MODEL",
+        "openai/gpt-oss-20b",
+    )
+
+    groq_timeout_seconds: float = float(
+        os.getenv(
+            "GROQ_TIMEOUT_SECONDS",
+            "60",
+        )
+    )
+
 
 settings = Settings()
