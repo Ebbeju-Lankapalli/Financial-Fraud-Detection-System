@@ -50,5 +50,14 @@ class Settings:
         )
     )
 
+    cors_origins: tuple[str, ...] = tuple(
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173",
+        ).split(",")
+        if origin.strip()
+    )
+
 
 settings = Settings()
