@@ -1,3 +1,12 @@
-fastapi
-uvicorn
-pydantic
+# API
+fastapi==0.141.1
+uvicorn==0.51.0
+pydantic==2.12.5
+
+# Model runtime
+torch==2.13.0
+transformers==5.15.0
+accelerate==1.14.0
+peft==0.20.0
+bitsandbytes==0.50.0
+huggingface-hub==1.27.0
