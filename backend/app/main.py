@@ -7,6 +7,9 @@ from __future__ import annotations
 from app.api.dashboard import (
     router as dashboard_router,
 )
+from app.api.evaluation import (
+    router as evaluation_router,
+)
 from app.api.transactions import (
     router as transactions_router,
 )
@@ -25,6 +28,10 @@ app.include_router(
 
 app.include_router(
     dashboard_router
+)
+
+app.include_router(
+    evaluation_router
 )
 
 
