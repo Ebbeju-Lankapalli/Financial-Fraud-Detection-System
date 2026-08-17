@@ -328,3 +328,11 @@ model-service/data/
 *.pid.lock
 *.seed
 *.bak
+# ============================================================
+# SQLite Runtime Databases
+# ============================================================
+
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

@@ -4,6 +4,9 @@ Main FastAPI application for the Financial Fraud Detection System.
 
 from __future__ import annotations
 
+from app.api.dashboard import (
+    router as dashboard_router,
+)
 from app.api.transactions import (
     router as transactions_router,
 )
@@ -18,6 +21,10 @@ app = FastAPI(
 
 app.include_router(
     transactions_router
+)
+
+app.include_router(
+    dashboard_router
 )
 
 
