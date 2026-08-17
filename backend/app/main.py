@@ -1,7 +1,41 @@
+"""
+Main FastAPI application for the Financial Fraud Detection System.
+"""
+
+from __future__ import annotations
+
+from app.api.transactions import (
+    router as transactions_router,
+)
+from app.core.config import settings
 from fastapi import FastAPI
 
-app = FastAPI(title="Financial Fraud Detection System")
+app = FastAPI(
+    title=settings.app_name,
+    version="1.0.0",
+)
+
+
+app.include_router(
+    transactions_router
+)
+
 
 @app.get("/")
-def read_root():
-    return {"message": "Financial Fraud Detection System API"}
+def read_root() -> dict[str, str]:
+    """Return a simple API identity response."""
+
+    return {
+        "message": (
+            "Financial Fraud Detection System API"
+        )
+    }
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Return backend health status."""
+
+    return {
+        "status": "ok",
+    }
