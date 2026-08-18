@@ -4,3 +4,4 @@ pydantic
 pytest
 requests
 groq
+python-dotenv

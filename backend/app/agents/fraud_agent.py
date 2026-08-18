@@ -27,6 +27,8 @@ from groq import Groq
 
 LOGGER = logging.getLogger(__name__)
 
+_AUTO_GROQ_CLIENT = object()
+
 
 class FraudAgentError(
     RuntimeError
@@ -41,23 +43,23 @@ class FraudAgent:
         self,
         *,
         analysis_tool: AnalyzeTransactionTool | None = None,
-        groq_client=None,
+        groq_client=_AUTO_GROQ_CLIENT,
     ) -> None:
         self.analysis_tool = (
             analysis_tool
             or AnalyzeTransactionTool()
         )
 
-        self.groq_client = groq_client
-
-        if (
-            self.groq_client is None
-            and settings.groq_api_key
-        ):
-            self.groq_client = Groq(
-                api_key=settings.groq_api_key,
-                timeout=settings.groq_timeout_seconds,
-            )
+        if groq_client is _AUTO_GROQ_CLIENT:
+            if settings.groq_api_key:
+                self.groq_client = Groq(
+                    api_key=settings.groq_api_key,
+                    timeout=settings.groq_timeout_seconds,
+                )
+            else:
+                self.groq_client = None
+        else:
+            self.groq_client = groq_client
 
     @property
     def groq_configured(
@@ -182,6 +184,8 @@ class FraudAgent:
                         "content": user_content,
                     },
                 ],
+                reasoning_format="hidden",
+                reasoning_effort="low",
                 temperature=0.2,
                 max_tokens=500,
             )
