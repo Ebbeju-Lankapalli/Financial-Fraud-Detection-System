@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from app.main import app
 from app.services.evaluation_service import (
     EvaluationService,
@@ -7,40 +8,52 @@ from app.services.evaluation_service import (
 )
 from fastapi.testclient import TestClient
 
-client = TestClient(app)
+client = TestClient(
+    app
+)
 
 
 def test_evaluation_service_loads_real_artifacts() -> None:
     service = EvaluationService()
 
-    base = service.get_base_metrics()
-    finetuned = (
-        service.get_finetuned_metrics()
-    )
-    comparison = service.get_comparison()
-
-    assert (
-        base["model"]
-        == "Qwen/Qwen2.5-1.5B-Instruct"
+    production = (
+        service.get_production_metrics()
     )
 
     assert (
-        finetuned["model"]
-        == (
-            "ebbejulankapalli/"
-            "financial-fraud-detector-"
-            "qwen2.5-qlora"
-        )
+        production["status"]
+        == "active_production_model"
     )
 
-    assert finetuned["accuracy"] == 0.468
-    assert finetuned["recall"] == 0.752
+    assert (
+        production["feature_count"]
+        == 20
+    )
+
+    assert round(
+        production["threshold"],
+        2,
+    ) == 0.83
 
     assert (
-        comparison["evaluation"][
-            "held_out_rows"
+        production["decision_source"]
+        == "catboost_ieee_cis"
+    )
+
+    research = (
+        service.get_research_summary()
+    )
+
+    assert (
+        research["status"]
+        == "research_experiment"
+    )
+
+    assert (
+        research[
+            "production_decision_source"
         ]
-        == 500
+        is False
     )
 
 
@@ -53,9 +66,56 @@ def test_evaluation_summary_endpoint() -> None:
 
     body = response.json()
 
-    assert "base_model" in body
-    assert "fine_tuned_model" in body
-    assert "comparison" in body
+    assert "production_model" in body
+    assert "production_threshold" in body
+    assert "research_model" in body
+
+    production = body[
+        "production_model"
+    ]
+
+    assert (
+        production["status"]
+        == "active_production_model"
+    )
+
+    assert (
+        production["model"]
+        == "catboost_reduced_fraud_detector"
+    )
+
+    assert (
+        production["feature_count"]
+        == 20
+    )
+
+    assert round(
+        production["threshold"],
+        2,
+    ) == 0.83
+
+    assert (
+        production[
+            "test_used_for_model_selection"
+        ]
+        is False
+    )
+
+    research = body[
+        "research_model"
+    ]
+
+    assert (
+        research["status"]
+        == "research_experiment"
+    )
+
+    assert (
+        research[
+            "production_decision_source"
+        ]
+        is False
+    )
 
 
 def test_evaluation_comparison_endpoint() -> None:
@@ -67,11 +127,84 @@ def test_evaluation_comparison_endpoint() -> None:
 
     body = response.json()
 
+    assert "base_model" in body
+    assert "fine_tuned_model" in body
+
+
+def test_production_evaluation_endpoint() -> None:
+    response = client.get(
+        "/api/evaluation/production"
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
     assert (
-        body["fine_tuned_model"][
-            "f1"
+        body["status"]
+        == "active_production_model"
+    )
+
+    assert (
+        body["decision_source"]
+        == "catboost_ieee_cis"
+    )
+
+    assert (
+        body["feature_count"]
+        == 20
+    )
+
+
+def test_production_threshold_endpoint() -> None:
+    response = client.get(
+        "/api/evaluation/production/threshold"
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert (
+        body["selection_dataset"]
+        == "validation"
+    )
+
+    assert (
+        body["selection_metric"]
+        == "f1"
+    )
+
+    assert round(
+        body["selected_threshold"],
+        2,
+    ) == 0.83
+
+    assert (
+        body["test_set_used"]
+        is False
+    )
+
+
+def test_research_evaluation_endpoint() -> None:
+    response = client.get(
+        "/api/evaluation/research"
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert (
+        body["status"]
+        == "research_experiment"
+    )
+
+    assert (
+        body[
+            "production_decision_source"
         ]
-        == 0.5857
+        is False
     )
 
 
@@ -82,13 +215,7 @@ def test_missing_evaluation_artifact_raises_error(
         project_root=tmp_path
     )
 
-    try:
-        service.get_base_metrics()
-
-    except EvaluationServiceError as exc:
-        assert "not found" in str(exc)
-
-    else:
-        raise AssertionError(
-            "Missing artifact should fail."
-        )
+    with pytest.raises(
+        EvaluationServiceError
+    ):
+        service.get_production_metrics()
