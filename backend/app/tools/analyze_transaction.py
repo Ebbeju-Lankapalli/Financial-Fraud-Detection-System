@@ -16,7 +16,7 @@ from app.services.transaction_service import (
 
 
 class AnalyzeTransactionTool:
-    """Run the canonical QLoRA fraud-analysis pipeline."""
+    """Run the canonical production fraud-analysis pipeline."""
 
     def __init__(
         self,

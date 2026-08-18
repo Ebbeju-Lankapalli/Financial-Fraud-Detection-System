@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 
 class FakeFraudModelService:
-    """Deterministic model service used by API tests."""
+    """Deterministic CatBoost service used by backend API tests."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -28,16 +28,19 @@ class FakeFraudModelService:
             else "LOW"
         )
 
+        probability = (
+            0.92
+            if risk == "HIGH"
+            else 0.25
+        )
+
         return FraudPrediction(
             risk=risk,
-            model="Qwen/Qwen2.5-1.5B-Instruct",
-            adapter=(
-                "ebbejulankapalli/"
-                "financial-fraud-detector-"
-                "qwen2.5-qlora"
-            ),
-            decision_source="fine_tuned_llm",
-            raw_output=risk,
+            fraud_probability=probability,
+            threshold=0.83,
+            model="catboost_reduced_fraud_detector",
+            feature_count=20,
+            decision_source="catboost_ieee_cis",
             valid_output=True,
         )
 
@@ -49,7 +52,8 @@ def build_test_client(
     TransactionRepository,
 ]:
     database_path = (
-        tmp_path / "transactions.db"
+        tmp_path
+        / "transactions.db"
     )
 
     repository = TransactionRepository(
@@ -78,12 +82,26 @@ def build_test_client(
 
 def transaction_payload() -> dict:
     return {
-        "type": "TRANSFER",
-        "amount": 85000,
-        "oldbalanceOrg": 85000,
-        "newbalanceOrig": 0,
-        "oldbalanceDest": 0,
-        "newbalanceDest": 85000,
+        "card2": 404.0,
+        "card1": 13926.0,
+        "addr1": 315.0,
+        "C1": 1.0,
+        "D2": 10.0,
+        "C13": 1.0,
+        "C2": 1.0,
+        "M5_enc": 1.0,
+        "D15": 20.0,
+        "C5": 0.0,
+        "C6": 1.0,
+        "C14": 1.0,
+        "M4_enc": 0.0,
+        "purchaser_email_domain": "gmail.com",
+        "card5": 142.0,
+        "M6_enc": 1.0,
+        "transaction_amt": 250.0,
+        "log_amt": None,
+        "D10": 12.0,
+        "D1": 5.0,
     }
 
 
@@ -104,6 +122,21 @@ def test_analyze_and_persist_transaction(
     body = response.json()
 
     assert body["prediction"]["risk"] == "HIGH"
+
+    assert (
+        body["prediction"][
+            "decision_source"
+        ]
+        == "catboost_ieee_cis"
+    )
+
+    assert (
+        body["prediction"][
+            "threshold"
+        ]
+        == 0.83
+    )
+
     assert body["analysis_id"]
     assert body["created_at"]
 
@@ -133,11 +166,24 @@ def test_transaction_history_and_lookup(
     assert history.status_code == 200
     assert len(history.json()) == 1
 
+    record = history.json()[0]
+
+    assert (
+        record["transaction_amt"]
+        == 250.0
+    )
+
+    assert (
+        record["feature_count"]
+        == 20
+    )
+
     lookup = client.get(
         f"/api/transactions/{analysis_id}"
     )
 
     assert lookup.status_code == 200
+
     assert (
         lookup.json()["analysis_id"]
         == analysis_id
@@ -166,7 +212,7 @@ def test_transaction_validation(
     )
 
     payload = transaction_payload()
-    payload["amount"] = -100
+    payload["transaction_amt"] = -100
 
     response = client.post(
         "/api/transactions/analyze",

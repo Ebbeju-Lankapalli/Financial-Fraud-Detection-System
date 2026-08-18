@@ -1,8 +1,8 @@
 """
 Fraud investigation agent.
 
-The QLoRA fraud classifier remains the decision source. Groq is used
-only to generate a grounded explanation and investigation guidance.
+The production CatBoost IEEE-CIS classifier is the fraud decision source.
+Groq is used only to generate grounded explanation and investigation guidance.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class FraudAgentError(
 
 
 class FraudAgent:
-    """Coordinate QLoRA classification and LLM explanation."""
+    """Coordinate CatBoost classification and LLM explanation."""
 
     def __init__(
         self,
@@ -71,25 +71,23 @@ class FraudAgent:
         self,
         request: AgentAnalysisRequest,
     ) -> AgentAnalysisResponse:
-        """Run fraud classification then generate investigation guidance."""
+        """Run CatBoost fraud screening and investigation guidance."""
 
         analysis = self.analysis_tool.run(
             request.transaction
         )
 
         if self.groq_client is None:
-            explanation = (
-                self._fallback_explanation(
-                    request,
-                    analysis,
-                )
-            )
-
             return AgentAnalysisResponse(
                 analysis_id=analysis.analysis_id,
                 created_at=analysis.created_at,
                 prediction=analysis.prediction,
-                explanation=explanation,
+                explanation=(
+                    self._fallback_explanation(
+                        request,
+                        analysis,
+                    )
+                ),
                 recommendations=(
                     self._default_recommendations(
                         analysis
@@ -100,9 +98,11 @@ class FraudAgent:
             )
 
         try:
-            explanation = self._generate_explanation(
-                request,
-                analysis,
+            explanation = (
+                self._generate_explanation(
+                    request,
+                    analysis,
+                )
             )
 
         except Exception as exc:
@@ -136,27 +136,33 @@ class FraudAgent:
         """Generate a grounded explanation using Groq."""
 
         transaction = request.transaction
+        prediction = analysis.prediction
 
         user_content = (
-            "Transaction:\n"
-            f"- Type: {transaction.type}\n"
-            f"- Amount: {transaction.amount:.2f}\n"
-            "- Sender balance before: "
-            f"{transaction.oldbalanceOrg:.2f}\n"
-            "- Sender balance after: "
-            f"{transaction.newbalanceOrig:.2f}\n"
-            "- Recipient balance before: "
-            f"{transaction.oldbalanceDest:.2f}\n"
-            "- Recipient balance after: "
-            f"{transaction.newbalanceDest:.2f}\n\n"
-            "Fraud classifier decision:\n"
-            f"- Risk: {analysis.prediction.risk}\n"
-            f"- Model: {analysis.prediction.model}\n\n"
+            "Production fraud screening result:\n"
+            f"- Risk: {prediction.risk}\n"
+            "- Fraud probability: "
+            f"{prediction.fraud_probability:.4f}\n"
+            f"- Decision threshold: {prediction.threshold:.2f}\n"
+            f"- Model: {prediction.model}\n"
+            "- Dataset family: IEEE-CIS Fraud Detection\n\n"
+            "Observed transaction fields:\n"
+            "- Transaction amount: "
+            f"{transaction.transaction_amt:.2f}\n"
+            f"- Card1: {transaction.card1}\n"
+            f"- Card2: {transaction.card2}\n"
+            f"- Card5: {transaction.card5}\n"
+            f"- Address feature: {transaction.addr1}\n"
+            "- Purchaser email domain: "
+            f"{transaction.purchaser_email_domain}\n\n"
+            "Important instruction: C*, D*, and M*_enc fields are "
+            "anonymized IEEE-CIS features. Do not invent a business "
+            "meaning for them. Treat them only as model inputs.\n"
         )
 
         if request.question:
             user_content += (
-                "Investigator question:\n"
+                "\nInvestigator question:\n"
                 f"{request.question}\n"
             )
 
@@ -203,16 +209,17 @@ class FraudAgent:
         """Produce a deterministic explanation without an external LLM."""
 
         transaction = request.transaction
-        risk = analysis.prediction.risk
+        prediction = analysis.prediction
 
         return (
-            f"The fine-tuned fraud classifier marked this "
-            f"transaction as {risk} risk. "
-            f"It is a {transaction.type} transaction for "
-            f"${transaction.amount:,.2f}. "
-            "The decision should be treated as a screening signal "
-            "and reviewed together with the recorded transaction "
-            "balances and account context."
+            "The production CatBoost fraud detector marked this "
+            f"transaction as {prediction.risk} risk with a "
+            f"{prediction.fraud_probability:.2%} fraud probability. "
+            f"The decision threshold is {prediction.threshold:.2f}. "
+            f"The transaction amount is "
+            f"${transaction.transaction_amt:,.2f}. "
+            "This is a screening result rather than proof of fraud, "
+            "and should be reviewed with account and transaction context."
         )
 
     @staticmethod
@@ -223,8 +230,8 @@ class FraudAgent:
 
         if analysis.prediction.risk == "HIGH":
             return [
-                "Review the transaction and account history.",
-                "Verify the sender and recipient activity.",
+                "Review the transaction and related account history.",
+                "Verify card, address, and purchaser activity.",
                 "Escalate for manual fraud investigation if warranted.",
             ]
 

@@ -1,9 +1,15 @@
 """
-SQLite repository for transaction-analysis audit history.
+SQLite repository for production fraud-analysis audit history.
+
+The current audit table stores the complete IEEE-CIS transaction payload
+as JSON together with the CatBoost prediction metadata.
+
+Legacy QLoRA/PaySim audit tables are preserved automatically when detected.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from threading import Lock
@@ -31,7 +37,9 @@ def sqlite_path_from_url(
 
     prefix = "sqlite:///"
 
-    if not database_url.startswith(prefix):
+    if not database_url.startswith(
+        prefix
+    ):
         raise ValueError(
             "Only sqlite:/// database URLs are supported."
         )
@@ -45,11 +53,13 @@ def sqlite_path_from_url(
             "SQLite database path cannot be empty."
         )
 
-    return Path(raw_path).expanduser()
+    return Path(
+        raw_path
+    ).expanduser()
 
 
 class TransactionRepository:
-    """Persist and retrieve fraud-analysis audit records."""
+    """Persist and retrieve production fraud-analysis records."""
 
     def __init__(
         self,
@@ -61,8 +71,10 @@ class TransactionRepository:
             or settings.database_url
         )
 
-        self.database_path = sqlite_path_from_url(
-            self.database_url
+        self.database_path = (
+            sqlite_path_from_url(
+                self.database_url
+            )
         )
 
         self._lock = Lock()
@@ -90,36 +102,157 @@ class TransactionRepository:
 
         return connection
 
+    @staticmethod
+    def _table_exists(
+        connection: sqlite3.Connection,
+        table_name: str,
+    ) -> bool:
+        """Return whether a SQLite table exists."""
+
+        row = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = ?
+            """,
+            (
+                table_name,
+            ),
+        ).fetchone()
+
+        return row is not None
+
+    @staticmethod
+    def _table_columns(
+        connection: sqlite3.Connection,
+        table_name: str,
+    ) -> set[str]:
+        """Return column names for one SQLite table."""
+
+        rows = connection.execute(
+            f"PRAGMA table_info({table_name})"
+        ).fetchall()
+
+        return {
+            str(
+                row["name"]
+            )
+            for row in rows
+        }
+
+    @classmethod
+    def _next_legacy_table_name(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> str:
+        """Return an unused legacy audit-table name."""
+
+        base = (
+            "transaction_analyses_"
+            "qlora_legacy"
+        )
+
+        if not cls._table_exists(
+            connection,
+            base,
+        ):
+            return base
+
+        index = 2
+
+        while cls._table_exists(
+            connection,
+            f"{base}_{index}",
+        ):
+            index += 1
+
+        return f"{base}_{index}"
+
+    def _migrate_legacy_table(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Preserve an existing QLoRA audit table before v2 creation."""
+
+        table_name = (
+            "transaction_analyses"
+        )
+
+        if not self._table_exists(
+            connection,
+            table_name,
+        ):
+            return
+
+        columns = self._table_columns(
+            connection,
+            table_name,
+        )
+
+        current_columns = {
+            "analysis_id",
+            "created_at",
+            "transaction_json",
+            "risk",
+            "fraud_probability",
+            "threshold",
+            "model",
+            "feature_count",
+            "decision_source",
+            "valid_output",
+        }
+
+        if current_columns.issubset(
+            columns
+        ):
+            return
+
+        legacy_name = (
+            self._next_legacy_table_name(
+                connection
+            )
+        )
+
+        connection.execute(
+            f"""
+            ALTER TABLE
+                transaction_analyses
+            RENAME TO
+                {legacy_name}
+            """
+        )
+
     def _initialize_database(
         self,
     ) -> None:
-        """Create the audit table when necessary."""
+        """Initialize the current audit table safely."""
 
-        query = """
+        create_query = """
         CREATE TABLE IF NOT EXISTS transaction_analyses (
             analysis_id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
 
-            type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            oldbalanceOrg REAL NOT NULL,
-            newbalanceOrig REAL NOT NULL,
-            oldbalanceDest REAL NOT NULL,
-            newbalanceDest REAL NOT NULL,
+            transaction_json TEXT NOT NULL,
 
             risk TEXT NOT NULL,
+            fraud_probability REAL NOT NULL,
+            threshold REAL NOT NULL,
             model TEXT NOT NULL,
-            adapter TEXT NOT NULL,
+            feature_count INTEGER NOT NULL,
             decision_source TEXT NOT NULL,
-            raw_output TEXT NOT NULL,
             valid_output INTEGER NOT NULL
         )
         """
 
         try:
             with self._connect() as connection:
+                self._migrate_legacy_table(
+                    connection
+                )
+
                 connection.execute(
-                    query
+                    create_query
                 )
 
                 connection.commit()
@@ -138,49 +271,52 @@ class TransactionRepository:
         transaction: TransactionAnalysisRequest,
         prediction: FraudPrediction,
     ) -> TransactionAuditRecord:
-        """Persist one analyzed transaction."""
+        """Persist one production fraud analysis."""
+
+        transaction_json = json.dumps(
+            transaction.model_dump(),
+            separators=(
+                ",",
+                ":",
+            ),
+        )
 
         query = """
         INSERT INTO transaction_analyses (
             analysis_id,
             created_at,
-            type,
-            amount,
-            oldbalanceOrg,
-            newbalanceOrig,
-            oldbalanceDest,
-            newbalanceDest,
+            transaction_json,
             risk,
+            fraud_probability,
+            threshold,
             model,
-            adapter,
+            feature_count,
             decision_source,
-            raw_output,
             valid_output
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         values = (
             analysis_id,
             created_at,
-            transaction.type,
-            transaction.amount,
-            transaction.oldbalanceOrg,
-            transaction.newbalanceOrig,
-            transaction.oldbalanceDest,
-            transaction.newbalanceDest,
+            transaction_json,
             prediction.risk,
+            prediction.fraud_probability,
+            prediction.threshold,
             prediction.model,
-            prediction.adapter,
+            prediction.feature_count,
             prediction.decision_source,
-            prediction.raw_output,
             int(
                 prediction.valid_output
             ),
         )
 
         try:
-            with self._lock, self._connect() as connection:
+            with (
+                self._lock,
+                self._connect() as connection,
+            ):
                 connection.execute(
                     query,
                     values,
@@ -205,7 +341,7 @@ class TransactionRepository:
         self,
         analysis_id: str,
     ) -> TransactionAuditRecord | None:
-        """Retrieve one audit record by analysis ID."""
+        """Retrieve one production audit record."""
 
         query = """
         SELECT *
@@ -217,7 +353,9 @@ class TransactionRepository:
             with self._connect() as connection:
                 row = connection.execute(
                     query,
-                    (analysis_id,),
+                    (
+                        analysis_id,
+                    ),
                 ).fetchone()
 
         except sqlite3.Error as exc:
@@ -238,7 +376,7 @@ class TransactionRepository:
         *,
         limit: int = 50,
     ) -> list[TransactionAuditRecord]:
-        """Return recent transaction analyses."""
+        """Return recent production analyses."""
 
         if limit <= 0:
             raise ValueError(
@@ -261,7 +399,9 @@ class TransactionRepository:
             with self._connect() as connection:
                 rows = connection.execute(
                     query,
-                    (limit,),
+                    (
+                        limit,
+                    ),
                 ).fetchall()
 
         except sqlite3.Error as exc:
@@ -280,7 +420,7 @@ class TransactionRepository:
     def count(
         self,
     ) -> int:
-        """Return total number of stored analyses."""
+        """Return total current production analyses."""
 
         query = """
         SELECT COUNT(*) AS total
@@ -309,11 +449,12 @@ class TransactionRepository:
     def get_dashboard_metrics(
         self,
     ) -> dict[str, int]:
-        """Return aggregate metrics across all stored analyses."""
+        """Return aggregate production fraud metrics."""
 
         query = """
         SELECT
             COUNT(*) AS total,
+
             COALESCE(
                 SUM(
                     CASE
@@ -324,6 +465,7 @@ class TransactionRepository:
                 ),
                 0
             ) AS high_count,
+
             COALESCE(
                 SUM(
                     CASE
@@ -334,6 +476,7 @@ class TransactionRepository:
                 ),
                 0
             ) AS low_count,
+
             COALESCE(
                 SUM(
                     CASE
@@ -344,6 +487,7 @@ class TransactionRepository:
                 ),
                 0
             ) AS valid_count,
+
             COALESCE(
                 SUM(
                     CASE
@@ -354,6 +498,7 @@ class TransactionRepository:
                 ),
                 0
             ) AS invalid_count
+
         FROM transaction_analyses
         """
 
@@ -396,30 +541,63 @@ class TransactionRepository:
             ),
         }
 
-
     @staticmethod
     def _row_to_record(
         row: sqlite3.Row,
     ) -> TransactionAuditRecord:
-        """Convert a SQLite row to the API schema."""
+        """Convert one current SQLite row into the API schema."""
+
+        try:
+            transaction = json.loads(
+                row[
+                    "transaction_json"
+                ]
+            )
+
+        except (
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise TransactionRepositoryError(
+                "Stored transaction payload "
+                "is invalid."
+            ) from exc
 
         return TransactionAuditRecord(
-            analysis_id=row["analysis_id"],
-            created_at=row["created_at"],
-            type=row["type"],
-            amount=row["amount"],
-            oldbalanceOrg=row["oldbalanceOrg"],
-            newbalanceOrig=row["newbalanceOrig"],
-            oldbalanceDest=row["oldbalanceDest"],
-            newbalanceDest=row["newbalanceDest"],
-            risk=row["risk"],
-            model=row["model"],
-            adapter=row["adapter"],
+            analysis_id=row[
+                "analysis_id"
+            ],
+            created_at=row[
+                "created_at"
+            ],
+            **transaction,
+            risk=row[
+                "risk"
+            ],
+            fraud_probability=float(
+                row[
+                    "fraud_probability"
+                ]
+            ),
+            threshold=float(
+                row[
+                    "threshold"
+                ]
+            ),
+            model=row[
+                "model"
+            ],
+            feature_count=int(
+                row[
+                    "feature_count"
+                ]
+            ),
             decision_source=row[
                 "decision_source"
             ],
-            raw_output=row["raw_output"],
             valid_output=bool(
-                row["valid_output"]
+                row[
+                    "valid_output"
+                ]
             ),
         )

@@ -1,5 +1,5 @@
 """
-HTTP client for the dedicated fraud model service.
+HTTP client for the production CatBoost fraud model service.
 """
 
 from __future__ import annotations
@@ -8,8 +8,12 @@ from typing import Any
 
 import requests
 from app.core.config import settings
-from app.schemas.prediction import FraudPrediction
-from app.schemas.transaction import TransactionAnalysisRequest
+from app.schemas.prediction import (
+    FraudPrediction,
+)
+from app.schemas.transaction import (
+    TransactionAnalysisRequest,
+)
 
 
 class FraudModelServiceError(
@@ -19,7 +23,7 @@ class FraudModelServiceError(
 
 
 class FraudModelService:
-    """Client used by the backend to call the QLoRA model service."""
+    """Call the production IEEE-CIS CatBoost inference endpoint."""
 
     def __init__(
         self,
@@ -46,7 +50,10 @@ class FraudModelService:
     ) -> dict[str, Any]:
         """Send one POST request to the model service."""
 
-        url = f"{self.base_url}{path}"
+        url = (
+            f"{self.base_url}"
+            f"{path}"
+        )
 
         try:
             response = requests.post(
@@ -69,12 +76,16 @@ class FraudModelService:
 
         try:
             body = response.json()
+
         except ValueError as exc:
             raise FraudModelServiceError(
                 "Fraud model service returned invalid JSON."
             ) from exc
 
-        if not isinstance(body, dict):
+        if not isinstance(
+            body,
+            dict,
+        ):
             raise FraudModelServiceError(
                 "Fraud model service returned "
                 "an unexpected response."
@@ -86,13 +97,13 @@ class FraudModelService:
         self,
         transaction: TransactionAnalysisRequest,
     ) -> FraudPrediction:
-        """Request a fraud prediction for one transaction."""
-
-        payload = transaction.model_dump()
+        """Request a production CatBoost fraud prediction."""
 
         body = self._post(
-            "/predict",
-            payload=payload,
+            "/catboost/predict",
+            payload=(
+                transaction.model_dump()
+            ),
         )
 
         try:
@@ -103,5 +114,5 @@ class FraudModelService:
         except Exception as exc:
             raise FraudModelServiceError(
                 "Fraud model service returned "
-                "an invalid prediction schema."
+                "an invalid CatBoost prediction schema."
             ) from exc

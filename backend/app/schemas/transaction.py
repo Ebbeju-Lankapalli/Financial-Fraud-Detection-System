@@ -1,53 +1,61 @@
 """
-Transaction schemas exposed by the main backend.
+Production transaction schemas exposed by the main backend.
+
+The production fraud detector uses the reduced 20-feature IEEE-CIS
+CatBoost model.
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, Field
-
-TransactionType = Literal[
-    "CASH_IN",
-    "CASH_OUT",
-    "DEBIT",
-    "PAYMENT",
-    "TRANSFER",
-]
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+)
 
 
 class TransactionAnalysisRequest(BaseModel):
-    """Transaction submitted for fraud analysis."""
+    """Transaction submitted to the production CatBoost detector."""
 
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
     )
 
-    type: TransactionType
+    card2: float | None = None
 
-    amount: float = Field(
+    card1: float = Field(
         ...,
         ge=0.0,
     )
 
-    oldbalanceOrg: float = Field(
+    addr1: float | None = Field(
+        default=None,
+        ge=0.0,
+    )
+
+    C1: float | None = None
+    D2: float | None = None
+    C13: float | None = None
+    C2: float | None = None
+    M5_enc: float | None = None
+    D15: float | None = None
+    C5: float | None = None
+    C6: float | None = None
+    C14: float | None = None
+    M4_enc: float | None = None
+
+    purchaser_email_domain: str | None = None
+
+    card5: float | None = None
+    M6_enc: float | None = None
+
+    transaction_amt: float = Field(
         ...,
         ge=0.0,
     )
 
-    newbalanceOrig: float = Field(
-        ...,
-        ge=0.0,
-    )
+    log_amt: float | None = None
 
-    oldbalanceDest: float = Field(
-        ...,
-        ge=0.0,
-    )
-
-    newbalanceDest: float = Field(
-        ...,
-        ge=0.0,
-    )
+    D10: float | None = None
+    D1: float | None = None

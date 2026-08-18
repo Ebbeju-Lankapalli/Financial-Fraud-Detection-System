@@ -336,3 +336,6 @@ model-service/data/
 *.db-journal
 *.sqlite
 *.sqlite3
+
+# Local database migration backups
+*.db.before-*
