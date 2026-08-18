@@ -1,0 +1,21 @@
+{
+  "model": "CatBoostClassifier",
+  "threshold": 0.5,
+  "train_rows": 413378,
+  "validation_rows": 88581,
+  "feature_count": 61,
+  "categorical_feature_count": 6,
+  "positive_class_weight": 27.434310083918007,
+  "accuracy": 0.9377970445129317,
+  "precision": 0.31166056166056166,
+  "recall": 0.6712689020381328,
+  "f1": 0.4256827183656452,
+  "roc_auc": 0.920031628497942,
+  "pr_auc": 0.5478404906002586,
+  "true_negatives": 81029,
+  "false_positives": 4510,
+  "false_negatives": 1000,
+  "true_positives": 2042,
+  "training_seconds": 159.8732442855835,
+  "best_iteration": 793
+}

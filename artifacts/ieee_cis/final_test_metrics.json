@@ -1,0 +1,20 @@
+{
+  "model": "CatBoostClassifier",
+  "dataset": "chronological_test",
+  "threshold": 0.7700000000000001,
+  "threshold_selected_on": "validation",
+  "test_rows": 88581,
+  "fraud_rows": 3083,
+  "feature_count": 61,
+  "accuracy": 0.9669793748094964,
+  "precision": 0.5293244246473645,
+  "recall": 0.462536490431398,
+  "f1": 0.49368184178639435,
+  "roc_auc": 0.8970305735869663,
+  "pr_auc": 0.49689946642616495,
+  "true_negatives": 84230,
+  "false_positives": 1268,
+  "false_negatives": 1657,
+  "true_positives": 1426,
+  "test_used_for_model_selection": false
+}
