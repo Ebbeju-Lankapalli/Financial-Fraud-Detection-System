@@ -261,3 +261,92 @@ def test_agent_analyze_endpoint() -> None:
         agent_api.fraud_agent = (
             original_agent
         )
+
+
+def test_agent_prompt_protects_anonymized_features() -> None:
+    """Ensure the LLM receives explicit IEEE-CIS grounding rules."""
+
+    captured = {}
+
+    class CapturingCompletions:
+        def create(
+            self,
+            **kwargs,
+        ):
+            captured.update(
+                kwargs
+            )
+
+            return FakeCompletion()
+
+    class CapturingChat:
+        completions = (
+            CapturingCompletions()
+        )
+
+    class CapturingGroqClient:
+        chat = CapturingChat()
+
+    agent = FraudAgent(
+        analysis_tool=(
+            FakeAnalyzeTransactionTool()
+        ),
+        groq_client=CapturingGroqClient(),
+    )
+
+    result = agent.analyze(
+        AgentAnalysisRequest(
+            transaction=transaction(),
+            question=(
+                "Is card1 the real card number "
+                "and is addr1 the billing address?"
+            ),
+        )
+    )
+
+    assert result.llm_used is True
+
+    messages = captured[
+        "messages"
+    ]
+
+    system_content = (
+        messages[0]["content"]
+        .lower()
+    )
+
+    user_content = (
+        messages[1]["content"]
+        .lower()
+    )
+
+    assert "anonymized" in system_content
+    assert "card1" in system_content
+    assert "addr1" in system_content
+
+    assert (
+        "do not call card1/card2/card5 "
+        "actual card numbers"
+        in system_content
+    )
+
+    assert (
+        "do not call addr1 a billing"
+        in system_content
+    )
+
+    assert (
+        "anonymized feature card1"
+        in user_content
+    )
+
+    assert (
+        "anonymized feature addr1"
+        in user_content
+    )
+
+    assert (
+        "do not describe them as actual "
+        "card numbers"
+        in user_content
+    )

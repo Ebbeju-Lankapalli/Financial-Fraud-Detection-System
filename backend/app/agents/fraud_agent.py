@@ -151,15 +151,25 @@ class FraudAgent:
             "Observed transaction fields:\n"
             "- Transaction amount: "
             f"{transaction.transaction_amt:.2f}\n"
-            f"- Card1: {transaction.card1}\n"
-            f"- Card2: {transaction.card2}\n"
-            f"- Card5: {transaction.card5}\n"
-            f"- Address feature: {transaction.addr1}\n"
             "- Purchaser email domain: "
-            f"{transaction.purchaser_email_domain}\n\n"
-            "Important instruction: C*, D*, and M*_enc fields are "
-            "anonymized IEEE-CIS features. Do not invent a business "
-            "meaning for them. Treat them only as model inputs.\n"
+            f"{transaction.purchaser_email_domain}\n"
+            "- Anonymized feature card1: "
+            f"{transaction.card1}\n"
+            "- Anonymized feature card2: "
+            f"{transaction.card2}\n"
+            "- Anonymized feature card5: "
+            f"{transaction.card5}\n"
+            "- Anonymized feature addr1: "
+            f"{transaction.addr1}\n\n"
+            "Grounding constraint:\n"
+            "- card1, card2, card5, addr1, C*, D*, and M*_enc "
+            "are anonymized or encoded IEEE-CIS model features.\n"
+            "- Their real-world business meanings are not supplied.\n"
+            "- Do not describe them as actual card numbers, issuers, "
+            "billing addresses, shipping addresses, cardholder data, "
+            "or any other inferred business concept.\n"
+            "- Refer to them only by field name or as anonymized "
+            "model features.\n"
         )
 
         if request.question:
@@ -235,7 +245,10 @@ class FraudAgent:
         if analysis.prediction.risk == "HIGH":
             return [
                 "Review the transaction and related account history.",
-                "Verify card, address, and purchaser activity.",
+                (
+                    "Verify customer, payment, device, and account context "
+                    "using trusted operational records."
+                ),
                 "Escalate for manual fraud investigation if warranted.",
             ]
 
