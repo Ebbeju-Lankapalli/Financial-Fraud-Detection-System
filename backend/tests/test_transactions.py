@@ -220,3 +220,38 @@ def test_transaction_validation(
     )
 
     assert response.status_code == 422
+
+
+def test_database_backend_detection() -> None:
+    from app.repositories.transaction_repository import (
+        detect_database_backend,
+        normalize_postgres_url,
+    )
+
+    assert (
+        detect_database_backend(
+            "sqlite:///./app.db"
+        )
+        == "sqlite"
+    )
+
+    assert (
+        detect_database_backend(
+            "postgresql://user:pass@host/db"
+        )
+        == "postgresql"
+    )
+
+    assert (
+        detect_database_backend(
+            "postgres://user:pass@host/db"
+        )
+        == "postgresql"
+    )
+
+    assert (
+        normalize_postgres_url(
+            "postgres://user:pass@host/db"
+        )
+        == "postgresql://user:pass@host/db"
+    )

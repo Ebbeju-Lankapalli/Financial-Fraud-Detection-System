@@ -5,3 +5,4 @@ pytest
 requests
 groq
 python-dotenv
+psycopg[binary]>=3.2,<4

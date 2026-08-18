@@ -1,10 +1,14 @@
 """
-SQLite repository for production fraud-analysis audit history.
+Persistence repository for production fraud-analysis audit history.
 
-The current audit table stores the complete IEEE-CIS transaction payload
-as JSON together with the CatBoost prediction metadata.
+SQLite is used for local development and automated tests.
+PostgreSQL is supported for persistent cloud deployment.
 
-Legacy QLoRA/PaySim audit tables are preserved automatically when detected.
+The repository stores the complete IEEE-CIS transaction payload as JSON
+together with the CatBoost prediction metadata.
+
+Legacy QLoRA/PaySim SQLite audit tables are preserved automatically
+when detected.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ import json
 import sqlite3
 from pathlib import Path
 from threading import Lock
+from typing import Any, Literal
 
+import psycopg
 from app.core.config import settings
 from app.schemas.prediction import (
     FraudPrediction,
@@ -22,12 +28,42 @@ from app.schemas.prediction import (
 from app.schemas.transaction import (
     TransactionAnalysisRequest,
 )
+from psycopg.rows import dict_row
+
+DatabaseBackend = Literal[
+    "sqlite",
+    "postgresql",
+]
 
 
 class TransactionRepositoryError(
     RuntimeError
 ):
     """Raised when transaction persistence fails."""
+
+
+def detect_database_backend(
+    database_url: str,
+) -> DatabaseBackend:
+    """Return the database backend represented by a URL."""
+
+    if database_url.startswith(
+        "sqlite:///"
+    ):
+        return "sqlite"
+
+    if database_url.startswith(
+        (
+            "postgresql://",
+            "postgres://",
+        )
+    ):
+        return "postgresql"
+
+    raise ValueError(
+        "DATABASE_URL must use sqlite:/// "
+        "or postgresql://."
+    )
 
 
 def sqlite_path_from_url(
@@ -41,7 +77,7 @@ def sqlite_path_from_url(
         prefix
     ):
         raise ValueError(
-            "Only sqlite:/// database URLs are supported."
+            "Expected a sqlite:/// database URL."
         )
 
     raw_path = database_url[
@@ -58,6 +94,24 @@ def sqlite_path_from_url(
     ).expanduser()
 
 
+def normalize_postgres_url(
+    database_url: str,
+) -> str:
+    """Normalize legacy postgres:// URLs for psycopg."""
+
+    if database_url.startswith(
+        "postgres://"
+    ):
+        return (
+            "postgresql://"
+            + database_url[
+                len("postgres://"):
+            ]
+        )
+
+    return database_url
+
+
 class TransactionRepository:
     """Persist and retrieve production fraud-analysis records."""
 
@@ -71,20 +125,31 @@ class TransactionRepository:
             or settings.database_url
         )
 
-        self.database_path = (
-            sqlite_path_from_url(
+        self.backend = (
+            detect_database_backend(
                 self.database_url
             )
         )
+
+        self.database_path: Path | None = None
+
+        if self.backend == "sqlite":
+            self.database_path = (
+                sqlite_path_from_url(
+                    self.database_url
+                )
+            )
 
         self._lock = Lock()
 
         self._initialize_database()
 
-    def _connect(
+    def _connect_sqlite(
         self,
     ) -> sqlite3.Connection:
         """Create a configured SQLite connection."""
+
+        assert self.database_path is not None
 
         self.database_path.parent.mkdir(
             parents=True,
@@ -102,8 +167,42 @@ class TransactionRepository:
 
         return connection
 
+    def _connect_postgresql(
+        self,
+    ):
+        """Create a configured PostgreSQL connection."""
+
+        return psycopg.connect(
+            normalize_postgres_url(
+                self.database_url
+            ),
+            row_factory=dict_row,
+            connect_timeout=30,
+        )
+
+    def _connect(
+        self,
+    ):
+        """Create a connection for the configured database backend."""
+
+        if self.backend == "sqlite":
+            return self._connect_sqlite()
+
+        return self._connect_postgresql()
+
+    @property
+    def _placeholder(
+        self,
+    ) -> str:
+        """Return the parameter placeholder for the active backend."""
+
+        if self.backend == "sqlite":
+            return "?"
+
+        return "%s"
+
     @staticmethod
-    def _table_exists(
+    def _sqlite_table_exists(
         connection: sqlite3.Connection,
         table_name: str,
     ) -> bool:
@@ -124,7 +223,7 @@ class TransactionRepository:
         return row is not None
 
     @staticmethod
-    def _table_columns(
+    def _sqlite_table_columns(
         connection: sqlite3.Connection,
         table_name: str,
     ) -> set[str]:
@@ -146,14 +245,14 @@ class TransactionRepository:
         cls,
         connection: sqlite3.Connection,
     ) -> str:
-        """Return an unused legacy audit-table name."""
+        """Return an unused legacy SQLite audit-table name."""
 
         base = (
             "transaction_analyses_"
             "qlora_legacy"
         )
 
-        if not cls._table_exists(
+        if not cls._sqlite_table_exists(
             connection,
             base,
         ):
@@ -161,7 +260,7 @@ class TransactionRepository:
 
         index = 2
 
-        while cls._table_exists(
+        while cls._sqlite_table_exists(
             connection,
             f"{base}_{index}",
         ):
@@ -169,25 +268,27 @@ class TransactionRepository:
 
         return f"{base}_{index}"
 
-    def _migrate_legacy_table(
+    def _migrate_legacy_sqlite_table(
         self,
         connection: sqlite3.Connection,
     ) -> None:
-        """Preserve an existing QLoRA audit table before v2 creation."""
+        """Preserve an existing QLoRA SQLite audit table."""
 
         table_name = (
             "transaction_analyses"
         )
 
-        if not self._table_exists(
+        if not self._sqlite_table_exists(
             connection,
             table_name,
         ):
             return
 
-        columns = self._table_columns(
-            connection,
-            table_name,
+        columns = (
+            self._sqlite_table_columns(
+                connection,
+                table_name,
+            )
         )
 
         current_columns = {
@@ -226,30 +327,29 @@ class TransactionRepository:
     def _initialize_database(
         self,
     ) -> None:
-        """Initialize the current audit table safely."""
+        """Initialize the production audit table."""
 
         create_query = """
         CREATE TABLE IF NOT EXISTS transaction_analyses (
             analysis_id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
-
             transaction_json TEXT NOT NULL,
-
             risk TEXT NOT NULL,
-            fraud_probability REAL NOT NULL,
-            threshold REAL NOT NULL,
+            fraud_probability DOUBLE PRECISION NOT NULL,
+            threshold DOUBLE PRECISION NOT NULL,
             model TEXT NOT NULL,
             feature_count INTEGER NOT NULL,
             decision_source TEXT NOT NULL,
-            valid_output INTEGER NOT NULL
+            valid_output BOOLEAN NOT NULL
         )
         """
 
         try:
             with self._connect() as connection:
-                self._migrate_legacy_table(
-                    connection
-                )
+                if self.backend == "sqlite":
+                    self._migrate_legacy_sqlite_table(
+                        connection
+                    )
 
                 connection.execute(
                     create_query
@@ -257,7 +357,10 @@ class TransactionRepository:
 
                 connection.commit()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to initialize "
                 "transaction database."
@@ -281,7 +384,9 @@ class TransactionRepository:
             ),
         )
 
-        query = """
+        p = self._placeholder
+
+        query = f"""
         INSERT INTO transaction_analyses (
             analysis_id,
             created_at,
@@ -294,7 +399,10 @@ class TransactionRepository:
             decision_source,
             valid_output
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (
+            {p}, {p}, {p}, {p}, {p},
+            {p}, {p}, {p}, {p}, {p}
+        )
         """
 
         values = (
@@ -307,9 +415,7 @@ class TransactionRepository:
             prediction.model,
             prediction.feature_count,
             prediction.decision_source,
-            int(
-                prediction.valid_output
-            ),
+            prediction.valid_output,
         )
 
         try:
@@ -324,7 +430,10 @@ class TransactionRepository:
 
                 connection.commit()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to save "
                 "transaction analysis."
@@ -343,10 +452,12 @@ class TransactionRepository:
     ) -> TransactionAuditRecord | None:
         """Retrieve one production audit record."""
 
-        query = """
+        p = self._placeholder
+
+        query = f"""
         SELECT *
         FROM transaction_analyses
-        WHERE analysis_id = ?
+        WHERE analysis_id = {p}
         """
 
         try:
@@ -358,7 +469,10 @@ class TransactionRepository:
                     ),
                 ).fetchone()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to retrieve "
                 "transaction analysis."
@@ -388,11 +502,13 @@ class TransactionRepository:
                 "limit cannot exceed 500."
             )
 
-        query = """
+        p = self._placeholder
+
+        query = f"""
         SELECT *
         FROM transaction_analyses
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT {p}
         """
 
         try:
@@ -404,7 +520,10 @@ class TransactionRepository:
                     ),
                 ).fetchall()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to list "
                 "transaction analyses."
@@ -433,7 +552,10 @@ class TransactionRepository:
                     query
                 ).fetchone()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to count "
                 "transaction analyses."
@@ -480,7 +602,7 @@ class TransactionRepository:
             COALESCE(
                 SUM(
                     CASE
-                        WHEN valid_output = 1
+                        WHEN valid_output = TRUE
                         THEN 1
                         ELSE 0
                     END
@@ -491,7 +613,7 @@ class TransactionRepository:
             COALESCE(
                 SUM(
                     CASE
-                        WHEN valid_output = 0
+                        WHEN valid_output = FALSE
                         THEN 1
                         ELSE 0
                     END
@@ -508,7 +630,10 @@ class TransactionRepository:
                     query
                 ).fetchone()
 
-        except sqlite3.Error as exc:
+        except (
+            sqlite3.Error,
+            psycopg.Error,
+        ) as exc:
             raise TransactionRepositoryError(
                 "Failed to calculate "
                 "dashboard metrics."
@@ -543,9 +668,9 @@ class TransactionRepository:
 
     @staticmethod
     def _row_to_record(
-        row: sqlite3.Row,
+        row: Any,
     ) -> TransactionAuditRecord:
-        """Convert one current SQLite row into the API schema."""
+        """Convert a database row into the API audit schema."""
 
         try:
             transaction = json.loads(
